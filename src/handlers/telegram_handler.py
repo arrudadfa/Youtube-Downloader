@@ -151,12 +151,19 @@ async def _execute_download(
 
     try:
         download_result = await downloader.download(url, progress_callback=on_progress)
-        await update_progress("Enviando vídeo...")
-        video = FSInputFile(download_result.file_path)
-        await message.answer_video(
-            video,
-            caption=f"✅ {download_result.title}\n📦 {download_result.size_bytes // 1024 // 1024} MB",
-        )
+        media = FSInputFile(download_result.file_path)
+        size_mb = download_result.size_bytes // 1024 // 1024
+        caption = f"✅ {download_result.title}\n📦 {size_mb} MB"
+
+        if download_result.media_kind == "photo":
+            await update_progress("Enviando imagem...")
+            if download_result.size_bytes <= 10 * 1024 * 1024:
+                await message.answer_photo(media, caption=caption)
+            else:
+                await message.answer_document(media, caption=caption)
+        else:
+            await update_progress("Enviando vídeo...")
+            await message.answer_video(media, caption=caption)
         await status_msg.delete()
     except DownloadError as exc:
         logger.error("DownloadError para %s: %s", url, exc)

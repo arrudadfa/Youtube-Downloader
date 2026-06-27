@@ -41,6 +41,14 @@ class Settings:
     instagram_session_path: Path = field(
         default_factory=lambda: Path(os.getenv("INSTAGRAM_SESSION_PATH", "./data/instagram_session.json"))
     )
+    instagram_cookies_path: Path | None = field(
+        default_factory=lambda: (
+            Path(p) if (p := os.getenv("INSTAGRAM_COOKIES_PATH", "").strip()) else None
+        )
+    )
+    instagram_cookies_browser: str = field(
+        default_factory=lambda: os.getenv("INSTAGRAM_COOKIES_BROWSER", "").strip()
+    )
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     bot_mode: str = field(default_factory=lambda: os.getenv("BOT_MODE", "polling"))
     webhook_url: str = field(default_factory=lambda: os.getenv("WEBHOOK_URL", ""))

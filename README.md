@@ -45,6 +45,8 @@ cp .env.example .env
 | `INSTAGRAM_USERNAME/PASSWORD` | Para instagrapi |
 | `INSTAGRAM_VERIFICATION_CODE` | Código TOTP (opcional; prefira `/ig2fa`) |
 | `INSTAGRAM_SESSION_PATH` | Sessão salva após login (padrão: `./data/instagram_session.json`) |
+| `INSTAGRAM_COOKIES_PATH` | Arquivo `cookies.txt` (Netscape) para gallery-dl — opcional |
+| `INSTAGRAM_COOKIES_BROWSER` | Cookies do navegador para gallery-dl (`chrome`, `firefox`, `edge`) |
 
 ## Instagram com 2FA
 
@@ -52,6 +54,65 @@ cp .env.example .env
 2. Inicie o bot e envie **`/ig2fa 123456`** (código do autenticador, válido ~30s)
 3. A sessão é salva em `data/instagram_session.json` — não precisa repetir a cada download
 4. Alternativa: `INSTAGRAM_VERIFICATION_CODE` no `.env` só na primeira autenticação
+
+### Cookies para gallery-dl
+
+O `gallery-dl` precisa de cookies de login no Instagram. Há **3 formas** (em ordem de prioridade):
+
+1. **Automático (recomendado)** — após `/ig2fa`, o bot exporta cookies de `data/instagram_session.json` para `data/instagram_gallery_cookies.txt` e passa `-C` ao gallery-dl no fallback.
+
+2. **Arquivo manual** — exporte cookies do navegador (extensão *Get cookies.txt LOCALLY* ou similar) e configure:
+   ```env
+   INSTAGRAM_COOKIES_PATH=./data/instagram_cookies.txt
+   ```
+
+3. **Direto do navegador** — o gallery-dl lê cookies do Chrome/Firefox/Edge:
+   ```env
+   INSTAGRAM_COOKIES_BROWSER=chrome
+   ```
+   O navegador precisa estar logado no Instagram na mesma máquina do bot.
+
+## Deploy na VPS (Easypanel / Hostinger)
+
+Na VPS **não use** `INSTAGRAM_COOKIES_BROWSER` — não há Chrome/Firefox logado no servidor.
+
+### Variáveis no Easypanel
+
+| Variável | Valor |
+|----------|--------|
+| `INSTAGRAM_USERNAME` | seu usuário |
+| `INSTAGRAM_PASSWORD` | sua senha |
+| `INSTAGRAM_SESSION_PATH` | `./data/instagram_session.json` |
+| `BOT_MODE` | `polling` (mais simples; webhook exige domínio) |
+
+Deixe `INSTAGRAM_COOKIES_BROWSER` **vazio**.
+
+### Volume persistente (importante)
+
+Monte um volume em **`/app/data`** no Easypanel. Sem isso, a sessão Instagram se perde a cada redeploy e você precisa refazer o `/ig2fa`.
+
+Após o primeiro login, o bot salva:
+
+- `data/instagram_session.json` — sessão instagrapi
+- `data/instagram_gallery_cookies.txt` — cookies para gallery-dl (exportados automaticamente)
+
+### Autenticar na VPS
+
+1. Faça deploy com usuário/senha Instagram nas env vars
+2. Abra o bot no Telegram e envie **`/ig2fa 123456`** (código do autenticador, ~30s)
+3. Aguarde `✅ Instagram autenticado!`
+4. Teste com um link do Instagram
+
+### Alternativa: cookies do PC
+
+Se preferir não usar `/ig2fa` na VPS:
+
+1. No seu PC, exporte cookies do Instagram (extensão *Get cookies.txt LOCALLY*)
+2. Envie o arquivo para a VPS (SFTP ou file manager do Easypanel)
+3. Coloque em `/app/data/instagram_cookies.txt`
+4. Configure `INSTAGRAM_COOKIES_PATH=./data/instagram_cookies.txt`
+
+Cookies do navegador expiram mais rápido que a sessão instagrapi — o `/ig2fa` costuma ser mais estável.
 
 ## Executar
 

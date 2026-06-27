@@ -69,6 +69,7 @@ class InstagramSessionManager:
                 )
                 self._client = client
                 logger.info("Sessão Instagram restaurada: %s", self.session_path)
+                self._export_gallery_cookies(client)
                 return client
             except Exception as exc:
                 logger.warning("Sessão Instagram expirada, novo login: %s", exc)
@@ -99,6 +100,14 @@ class InstagramSessionManager:
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
         client.dump_settings(self.session_path)
         logger.info("Sessão Instagram salva em %s", self.session_path)
+        self._export_gallery_cookies(client)
+
+    def _export_gallery_cookies(self, client: Client) -> None:
+        from src.core.instagram_cookies import export_cookies_from_client
+
+        cache_path = self.session_path.parent / "instagram_gallery_cookies.txt"
+        if export_cookies_from_client(client, cache_path):
+            logger.info("Cookies gallery-dl exportados: %s", cache_path)
 
     def invalidate(self) -> None:
         self._client = None
