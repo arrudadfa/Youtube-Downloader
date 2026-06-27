@@ -15,6 +15,7 @@ def test_settings_load_defaults(monkeypatch):
     assert settings.max_video_size_mb == 50
     assert settings.download_timeout_seconds == 120
     assert settings.owner_user_id == 163177765
+    assert settings.openai_model == "gpt-4o"
 
 
 def test_settings_requires_token(monkeypatch):

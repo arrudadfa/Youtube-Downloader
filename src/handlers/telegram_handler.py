@@ -20,6 +20,7 @@ from aiogram.types import (
 
 from src.core.downloader import DownloadError, VideoDownloader
 from src.core.instagram_auth import InstagramAuthError, InstagramSessionManager
+from src.core.reels_analyzer import ReelsAnalysisError, ReelsAnalyzer
 from src.handlers.message_processor import MessageProcessor, ProcessResult, is_owner
 from src.utils.config import Settings
 from src.utils.logging import setup_logging
@@ -35,6 +36,7 @@ TELEGRAM_MEDIA_GROUP_LIMIT = 10
 
 def create_router(settings: Settings, processor: MessageProcessor, downloader: VideoDownloader) -> Router:
     router = Router()
+    reels_analyzer = ReelsAnalyzer(settings)
 
     @router.message(Command("start"))
     async def cmd_start(message: Message) -> None:
@@ -98,7 +100,7 @@ def create_router(settings: Settings, processor: MessageProcessor, downloader: V
             await _send_star_invoice(bot, message, result, settings)
             return
         if result.action == "download" and result.url:
-            await _execute_download(message, bot, result.url, downloader)
+            await _execute_download(message, bot, result.url, downloader, reels_analyzer)
 
     @router.pre_checkout_query()
     async def pre_checkout(query: PreCheckoutQuery) -> None:
@@ -114,7 +116,7 @@ def create_router(settings: Settings, processor: MessageProcessor, downloader: V
             await message.answer("Pagamento recebido, mas a URL expirou. Envie o link novamente.")
             return
         await message.answer("✅ Pagamento confirmado! Iniciando download...")
-        await _execute_download(message, bot, url, downloader)
+        await _execute_download(message, bot, url, downloader, reels_analyzer)
 
     return router
 
@@ -143,6 +145,7 @@ async def _execute_download(
     bot: Bot,
     url: str,
     downloader: VideoDownloader,
+    reels_analyzer: ReelsAnalyzer,
 ) -> None:
     status_msg = await message.answer("⏳ Validando URL...")
     download_result = None
@@ -161,6 +164,15 @@ async def _execute_download(
         size_mb = download_result.size_bytes // 1024 // 1024
         caption = f"✅ {download_result.title}\n📦 {size_mb} MB"
 
+        reels_caption: str | None = None
+        if reels_analyzer.enabled:
+            await update_progress("Gerando legenda para Reels com IA...")
+            try:
+                reels_caption = await reels_analyzer.analyze_files(download_result.files)
+            except ReelsAnalysisError as exc:
+                logger.warning("Falha ao gerar legenda Reels: %s", exc)
+                await message.answer(f"⚠️ Legenda Reels indisponível: {exc}")
+
         if download_result.media_kind == "album":
             await update_progress(f"Enviando carrossel ({len(download_result.files)} itens)...")
             await _send_media_album(message, download_result.files, caption)
@@ -175,6 +187,10 @@ async def _execute_download(
             await update_progress("Enviando vídeo...")
             media = FSInputFile(download_result.file_path)
             await message.answer_video(media, caption=caption)
+
+        if reels_caption:
+            await message.answer(f"📝 Legenda para Reels:\n\n{reels_caption}")
+
         await status_msg.delete()
     except DownloadError as exc:
         logger.error("DownloadError para %s: %s", url, exc)

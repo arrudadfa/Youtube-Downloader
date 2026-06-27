@@ -57,6 +57,8 @@ class Settings:
     s3_region: str = field(default_factory=lambda: os.getenv("S3_REGION", "us-east-1"))
     s3_access_key: str = field(default_factory=lambda: os.getenv("S3_ACCESS_KEY", ""))
     s3_secret_key: str = field(default_factory=lambda: os.getenv("S3_SECRET_KEY", ""))
+    openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", "").strip())
+    openai_model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-4o").strip())
 
     def __post_init__(self) -> None:
         if not self.telegram_bot_token:
