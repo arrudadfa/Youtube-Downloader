@@ -91,6 +91,20 @@ Deixe `INSTAGRAM_COOKIES_BROWSER` **vazio**.
 
 Monte um volume em **`/app/data`** no Easypanel. Sem isso, a sessão Instagram se perde a cada redeploy e você precisa refazer o `/ig2fa`.
 
+Monte também **`/app/downloads`** se quiser manter arquivos temporários entre reinícios (opcional).
+
+### Variáveis sensíveis (Docker)
+
+O `Dockerfile` **não** embute tokens nem senhas na imagem. Configure todas as credenciais como **variáveis de ambiente em runtime** no painel (Easypanel/Coolify), incluindo:
+
+- `TELEGRAM_BOT_TOKEN`
+- `WEBHOOK_SECRET` (se usar webhook)
+- `INSTAGRAM_PASSWORD`
+- `S3_ACCESS_KEY` / `S3_SECRET_KEY` (se usar S3)
+- `OPENAI_API_KEY`
+
+Isso evita que segredos fiquem gravados nas camadas da imagem Docker.
+
 Após o primeiro login, o bot salva:
 
 - `data/instagram_session.json` — sessão instagrapi
