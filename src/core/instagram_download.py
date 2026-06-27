@@ -26,8 +26,10 @@ class InstagramDownloadError(Exception):
     """Erro ao baixar mídia do Instagram."""
 
 
-def download_instagram_media(client: Client, url: str, folder: str) -> tuple[Path, str]:
-    """Baixa foto, vídeo ou item de álbum. Retorna (caminho, 'video'|'photo')."""
+def download_instagram_media(
+    client: Client, url: str, folder: str
+) -> list[tuple[Path, str]]:
+    """Baixa foto, vídeo ou carrossel. Retorna lista de (caminho, 'video'|'photo')."""
     try:
         media_pk = client.media_pk_from_url(url)
         media = client.media_info(media_pk)
@@ -42,31 +44,31 @@ def download_instagram_media(client: Client, url: str, folder: str) -> tuple[Pat
 
     if media.media_type == MEDIA_VIDEO:
         path = client.video_download(media_pk, folder=folder)
-        return Path(path), "video"
+        return [(Path(path), "video")]
 
     if media.media_type == MEDIA_PHOTO:
         path = client.photo_download(media_pk, folder=folder)
-        return Path(path), "photo"
+        return [(Path(path), "photo")]
 
     if media.media_type == MEDIA_ALBUM:
         paths = client.album_download(media_pk, folder=folder)
-        return _pick_best_album_file(paths)
+        return _collect_album_files(paths)
 
     raise InstagramDownloadError(
         f"Tipo de mídia Instagram não suportado (type={media.media_type})."
     )
 
 
-def _pick_best_album_file(paths: list[str | Path]) -> tuple[Path, str]:
-    path_objs = [Path(p) for p in paths]
-    videos = [p for p in path_objs if p.suffix.lower() in VIDEO_EXTENSIONS]
-    if videos:
-        best = max(videos, key=lambda p: p.stat().st_mtime)
-        return best, "video"
-
-    photos = [p for p in path_objs if p.suffix.lower() in PHOTO_EXTENSIONS]
-    if photos:
-        best = max(photos, key=lambda p: p.stat().st_mtime)
-        return best, "photo"
-
-    raise InstagramDownloadError("Álbum sem foto ou vídeo reconhecível.")
+def _collect_album_files(paths: list[str | Path]) -> list[tuple[Path, str]]:
+    """Retorna todas as mídias do carrossel na ordem do download."""
+    result: list[tuple[Path, str]] = []
+    for raw in paths:
+        path = Path(raw)
+        ext = path.suffix.lower()
+        if ext in VIDEO_EXTENSIONS:
+            result.append((path, "video"))
+        elif ext in PHOTO_EXTENSIONS:
+            result.append((path, "photo"))
+    if not result:
+        raise InstagramDownloadError("Álbum sem foto ou vídeo reconhecível.")
+    return result

@@ -25,8 +25,10 @@ class TestDownloadInstagramMedia:
         client.video_download.return_value = str(tmp_path / "clip.mp4")
         (tmp_path / "clip.mp4").write_bytes(b"video")
 
-        path, kind = download_instagram_media(client, "https://instagram.com/reel/abc/", str(tmp_path))
+        files = download_instagram_media(client, "https://instagram.com/reel/abc/", str(tmp_path))
 
+        assert len(files) == 1
+        path, kind = files[0]
         assert kind == "video"
         assert path.name == "clip.mp4"
         client.video_download.assert_called_once_with("123", folder=str(tmp_path))
@@ -39,27 +41,33 @@ class TestDownloadInstagramMedia:
         client.photo_download.return_value = str(tmp_path / "pic.jpg")
         (tmp_path / "pic.jpg").write_bytes(b"photo")
 
-        path, kind = download_instagram_media(client, "https://instagram.com/p/abc/", str(tmp_path))
+        files = download_instagram_media(client, "https://instagram.com/p/abc/", str(tmp_path))
 
+        assert len(files) == 1
+        path, kind = files[0]
         assert kind == "photo"
         assert path.name == "pic.jpg"
         client.photo_download.assert_called_once_with("456", folder=str(tmp_path))
 
-    def test_album_prefers_video(self, tmp_path: Path) -> None:
+    def test_album_returns_all_items(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.media_pk_from_url.return_value = "789"
         media = MagicMock(media_type=MEDIA_ALBUM)
         client.media_info.return_value = media
-        photo = tmp_path / "a.jpg"
-        video = tmp_path / "b.mp4"
-        photo.write_bytes(b"p")
+        photo1 = tmp_path / "a.jpg"
+        photo2 = tmp_path / "b.jpg"
+        video = tmp_path / "c.mp4"
+        photo1.write_bytes(b"p1")
+        photo2.write_bytes(b"p2")
         video.write_bytes(b"v")
-        client.album_download.return_value = [str(photo), str(video)]
+        client.album_download.return_value = [str(photo1), str(photo2), str(video)]
 
-        path, kind = download_instagram_media(client, "https://instagram.com/p/album/", str(tmp_path))
+        files = download_instagram_media(client, "https://instagram.com/p/album/", str(tmp_path))
 
-        assert kind == "video"
-        assert path.suffix == ".mp4"
+        assert len(files) == 3
+        assert files[0] == (photo1, "photo")
+        assert files[1] == (photo2, "photo")
+        assert files[2] == (video, "video")
 
     def test_rate_limit_error(self) -> None:
         from instagrapi.exceptions import PleaseWaitFewMinutes

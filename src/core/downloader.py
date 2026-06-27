@@ -37,11 +37,23 @@ class DownloadError(Exception):
 
 @dataclass
 class DownloadResult:
-    file_path: Path
+    files: list[tuple[Path, str]]
     title: str
     platform: str
-    size_bytes: int
-    media_kind: str = "video"
+
+    @property
+    def file_path(self) -> Path:
+        return self.files[0][0]
+
+    @property
+    def size_bytes(self) -> int:
+        return sum(path.stat().st_size for path, _ in self.files)
+
+    @property
+    def media_kind(self) -> str:
+        if len(self.files) > 1:
+            return "album"
+        return self.files[0][1]
 
 
 class VideoDownloader:
@@ -78,26 +90,21 @@ class VideoDownloader:
         strategy = get_download_strategy(platform)
         tools = self._tools_for_platform(platform, strategy)
         last_error: Exception | None = None
-        media_kind = "video"
 
         for tool in tools:
             try:
                 if progress_callback:
                     await _maybe_await(progress_callback(f"Baixando via {tool}..."))
                 logger.info("Tentativa %s para %s (%s)", tool, url, platform.value)
-                file_path, tool_media_kind = await self._run_tool(tool, url, platform)
-                media_kind = tool_media_kind
-                file_path = await self._ensure_size_limit(
-                    file_path, progress_callback, media_kind=media_kind
+                files = await self._run_tool(tool, url, platform)
+                files = await self._ensure_size_limit(
+                    files, progress_callback
                 )
-                size = file_path.stat().st_size
-                title = file_path.stem
+                title = files[0][0].stem
                 return DownloadResult(
-                    file_path=file_path,
+                    files=files,
                     title=title,
                     platform=platform.value,
-                    size_bytes=size,
-                    media_kind=media_kind,
                 )
             except Exception as exc:
                 last_error = exc
@@ -145,9 +152,10 @@ class VideoDownloader:
             return ["-C", str(cookies_path)]
         return []
 
-    async def _run_tool(self, tool: str, url: str, platform: Platform) -> tuple[Path, str]:
+    async def _run_tool(self, tool: str, url: str, platform: Platform) -> list[tuple[Path, str]]:
         if tool == "yt-dlp":
-            return await self._download_ytdlp(url), "video"
+            path = await self._download_ytdlp(url)
+            return [(path, "video")]
         if tool == "gallery-dl":
             return await self._download_gallery_dl(url, platform)
         if tool == "instagrapi":
@@ -171,21 +179,21 @@ class VideoDownloader:
         await self._run_subprocess(cmd)
         return self._find_latest_file()
 
-    async def _download_gallery_dl(self, url: str, platform: Platform) -> tuple[Path, str]:
+    async def _download_gallery_dl(self, url: str, platform: Platform) -> list[tuple[Path, str]]:
         """Instagram, TikTok, Threads."""
         dest = self._output_dir / hashlib.md5(url.encode()).hexdigest()[:12]
         dest.mkdir(parents=True, exist_ok=True)
         cmd = ["gallery-dl", "-d", str(dest), *self._gallery_dl_cookie_args(platform), url]
         await self._run_subprocess(cmd)
-        file_path = self._find_latest_file(search_dir=dest, allow_photos=True)
-        return file_path, self._media_kind_from_path(file_path)
+        file_paths = self._find_all_files(search_dir=dest, allow_photos=True)
+        return [(path, self._media_kind_from_path(path)) for path in file_paths]
 
-    async def _download_instagrapi(self, url: str) -> tuple[Path, str]:
+    async def _download_instagrapi(self, url: str) -> list[tuple[Path, str]]:
         """Instagram via instagrapi (requer credenciais + 2FA na 1ª vez)."""
         if not self.settings.instagram_username or not self.settings.instagram_password:
             raise DownloadError("Credenciais Instagram não configuradas.")
 
-        def _sync_download() -> tuple[Path, str]:
+        def _sync_download() -> list[tuple[Path, str]]:
             try:
                 client = self._instagram.get_client()
             except InstagramAuthError as exc:
@@ -220,7 +228,7 @@ class VideoDownloader:
                 raise DownloadError("Conteúdo privado ou requer autenticação.")
             raise DownloadError(stderr.decode(errors="replace")[:500])
 
-    def _find_latest_file(self, search_dir: Path | None = None, allow_photos: bool = False) -> Path:
+    def _find_all_files(self, search_dir: Path | None = None, allow_photos: bool = False) -> list[Path]:
         base = search_dir or self._output_dir
         extensions = VIDEO_EXTENSIONS | PHOTO_EXTENSIONS if allow_photos else VIDEO_EXTENSIONS
         candidates = [
@@ -231,7 +239,10 @@ class VideoDownloader:
         if not candidates:
             kind = "mídia" if allow_photos else "vídeo"
             raise DownloadError(f"Nenhum arquivo de {kind} encontrado após download.")
-        return max(candidates, key=lambda p: p.stat().st_mtime)
+        return sorted(candidates, key=lambda p: (p.name.lower(), p.stat().st_mtime))
+
+    def _find_latest_file(self, search_dir: Path | None = None, allow_photos: bool = False) -> Path:
+        return self._find_all_files(search_dir=search_dir, allow_photos=allow_photos)[-1]
 
     @staticmethod
     def _media_kind_from_path(file_path: Path) -> str:
@@ -241,26 +252,31 @@ class VideoDownloader:
 
     async def _ensure_size_limit(
         self,
-        file_path: Path,
+        files: list[tuple[Path, str]],
         progress_callback: Optional[Callable[[str], None]],
-        media_kind: str = "video",
-    ) -> Path:
+    ) -> list[tuple[Path, str]]:
         max_bytes = self.settings.max_video_size_mb * 1024 * 1024
-        if media_kind == "photo":
+        result: list[tuple[Path, str]] = []
+        for file_path, media_kind in files:
+            if media_kind == "photo":
+                if file_path.stat().st_size > max_bytes:
+                    raise DownloadError(
+                        f"Imagem excede {self.settings.max_video_size_mb}MB."
+                    )
+                result.append((file_path, media_kind))
+                continue
             if file_path.stat().st_size <= max_bytes:
-                return file_path
-            raise DownloadError(
-                f"Imagem excede {self.settings.max_video_size_mb}MB."
-            )
-        if file_path.stat().st_size <= max_bytes:
-            return file_path
-        if not self.settings.enable_compression:
-            raise DownloadError(
-                f"Arquivo excede {self.settings.max_video_size_mb}MB e compressão está desabilitada."
-            )
-        if progress_callback:
-            await _maybe_await(progress_callback("Comprimindo vídeo para caber no Telegram..."))
-        return await self._compress_video(file_path, max_bytes)
+                result.append((file_path, media_kind))
+                continue
+            if not self.settings.enable_compression:
+                raise DownloadError(
+                    f"Arquivo excede {self.settings.max_video_size_mb}MB e compressão está desabilitada."
+                )
+            if progress_callback:
+                await _maybe_await(progress_callback("Comprimindo vídeo para caber no Telegram..."))
+            compressed = await self._compress_video(file_path, max_bytes)
+            result.append((compressed, media_kind))
+        return result
 
     async def _compress_video(self, file_path: Path, max_bytes: int) -> Path:
         output = file_path.with_name(f"{file_path.stem}_compressed.mp4")
@@ -319,12 +335,16 @@ class VideoDownloader:
             return str(exc)
         return f"Erro no download: {exc}"
 
-    def cleanup(self, file_path: Path) -> None:
-        try:
-            if file_path.exists():
-                file_path.unlink()
-            parent = file_path.parent
-            if parent != self._output_dir and parent.exists() and not any(parent.iterdir()):
-                shutil.rmtree(parent, ignore_errors=True)
-        except OSError as exc:
-            logger.warning("Falha ao limpar %s: %s", file_path, exc)
+    def cleanup(self, file_paths: list[Path]) -> None:
+        cleaned_dirs: set[Path] = set()
+        for file_path in file_paths:
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                parent = file_path.parent
+                if parent != self._output_dir and parent.exists() and not any(parent.iterdir()):
+                    cleaned_dirs.add(parent)
+            except OSError as exc:
+                logger.warning("Falha ao limpar %s: %s", file_path, exc)
+        for parent in cleaned_dirs:
+            shutil.rmtree(parent, ignore_errors=True)

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import (
     FSInputFile,
+    InputMediaDocument,
+    InputMediaPhoto,
+    InputMediaVideo,
     LabeledPrice,
     Message,
     PreCheckoutQuery,
@@ -24,6 +28,9 @@ if TYPE_CHECKING:
     pass
 
 logger = setup_logging()
+
+TELEGRAM_PHOTO_LIMIT_BYTES = 10 * 1024 * 1024
+TELEGRAM_MEDIA_GROUP_LIMIT = 10
 
 
 def create_router(settings: Settings, processor: MessageProcessor, downloader: VideoDownloader) -> Router:
@@ -151,18 +158,22 @@ async def _execute_download(
 
     try:
         download_result = await downloader.download(url, progress_callback=on_progress)
-        media = FSInputFile(download_result.file_path)
         size_mb = download_result.size_bytes // 1024 // 1024
         caption = f"✅ {download_result.title}\n📦 {size_mb} MB"
 
-        if download_result.media_kind == "photo":
+        if download_result.media_kind == "album":
+            await update_progress(f"Enviando carrossel ({len(download_result.files)} itens)...")
+            await _send_media_album(message, download_result.files, caption)
+        elif download_result.media_kind == "photo":
             await update_progress("Enviando imagem...")
-            if download_result.size_bytes <= 10 * 1024 * 1024:
+            media = FSInputFile(download_result.file_path)
+            if download_result.size_bytes <= TELEGRAM_PHOTO_LIMIT_BYTES:
                 await message.answer_photo(media, caption=caption)
             else:
                 await message.answer_document(media, caption=caption)
         else:
             await update_progress("Enviando vídeo...")
+            media = FSInputFile(download_result.file_path)
             await message.answer_video(media, caption=caption)
         await status_msg.delete()
     except DownloadError as exc:
@@ -176,7 +187,27 @@ async def _execute_download(
         await status_msg.edit_text(f"❌ Erro inesperado: {exc}")
     finally:
         if download_result is not None:
-            downloader.cleanup(download_result.file_path)
+            downloader.cleanup([path for path, _ in download_result.files])
+
+
+async def _send_media_album(
+    message: Message,
+    files: list[tuple[Path, str]],
+    caption: str,
+) -> None:
+    for batch_start in range(0, len(files), TELEGRAM_MEDIA_GROUP_LIMIT):
+        batch = files[batch_start : batch_start + TELEGRAM_MEDIA_GROUP_LIMIT]
+        media_group = []
+        for index, (path, kind) in enumerate(batch):
+            item_caption = caption if batch_start == 0 and index == 0 else None
+            media_file = FSInputFile(path)
+            if kind == "video":
+                media_group.append(InputMediaVideo(media=media_file, caption=item_caption))
+            elif path.stat().st_size <= TELEGRAM_PHOTO_LIMIT_BYTES:
+                media_group.append(InputMediaPhoto(media=media_file, caption=item_caption))
+            else:
+                media_group.append(InputMediaDocument(media=media_file, caption=item_caption))
+        await message.answer_media_group(media_group)
 
 
 async def run_polling(settings: Settings) -> None:
