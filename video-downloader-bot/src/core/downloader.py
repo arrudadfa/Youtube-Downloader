@@ -89,6 +89,8 @@ class VideoDownloader:
             except Exception as exc:
                 last_error = exc
                 logger.warning("Falha com %s: %s", tool, exc)
+                if platform == Platform.INSTAGRAM and self._is_instagram_auth_error(exc):
+                    raise DownloadError(self._friendly_error(exc))
 
         raise DownloadError(self._friendly_error(last_error))
 
@@ -218,6 +220,15 @@ class VideoDownloader:
         raise DownloadError(
             f"Não foi possível comprimir abaixo de {self.settings.max_video_size_mb}MB."
         )
+
+    @staticmethod
+    def _is_instagram_auth_error(exc: Exception) -> bool:
+        if isinstance(exc, InstagramAuthError):
+            return True
+        if isinstance(exc, DownloadError):
+            msg = str(exc).lower()
+            return "2fa" in msg or "autentica" in msg or "credenciais instagram" in msg
+        return False
 
     @staticmethod
     def _friendly_error(exc: Exception | None) -> str:

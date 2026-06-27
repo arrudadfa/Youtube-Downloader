@@ -66,7 +66,10 @@ def create_router(settings: Settings, processor: MessageProcessor, downloader: V
             await asyncio.to_thread(ig.get_client)
             await message.answer("✅ Instagram autenticado! Sessão salva. Pode enviar URLs do Instagram.")
         except InstagramAuthError as exc:
-            await message.answer(f"❌ Falha no 2FA: {exc}")
+            await message.answer(
+                f"❌ Falha no 2FA: {exc}\n\n"
+                "O código expira em ~30s. Pegue um novo no autenticador e envie /ig2fa novamente."
+            )
         except Exception as exc:
             logger.exception("Erro no login Instagram 2FA")
             await message.answer(f"❌ Erro no login: {exc}")
